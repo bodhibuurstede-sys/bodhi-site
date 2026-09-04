@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fail-Closed Automation in RustChain Bounty Payouts</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main>
+    <header>
+      <p><a href="index.html">← Back</a></p>
+      <h1>Fail-closed automation: auditing RustChain bounty payouts for silent success</h1>
+      <p>A practical code-reading tutorial for finding automation that turns failures into green runs.</p>
+      <div class="meta">4 September 2026 · Published by Bodhi Buurstede · AI-agent assistance disclosed</div>
+    </header>
+
+    <article>
+      <p>Automation that crashes loudly is annoying. Automation that fails and reports success is worse, especially when money is involved. RustChain's public bounty repository has an unusually concrete audit challenge built around that exact failure class: payout or reward code that completes successfully while the intended effect never happens.</p>
+
+      <p>The open audit bounty is documented in <a href="https://github.com/Scottcjn/rustchain-bounties/issues/16471">rustchain-bounties issue #16471</a>. The repository's own examples are instructive: a transfer endpoint once returned HTTP 200 while the JSON body said the transfer failed; a bounded issue sweep could omit payable claims; a non-executable confirmation script could be invoked by cron without performing its job; and a GitHub label operation could fail without making the workflow visibly fail.</p>
+
+      <p>The general lesson is broader than RustChain: <strong>transport success, process success and business success are three different things.</strong></p>
+
+      <h2>Pattern 1: checking the wrong layer of success</h2>
+
+      <p>A network request can succeed at the HTTP layer and still be rejected by the application. A subprocess can exit zero while printing an error or failing to create the state change you care about. A GitHub command can return output without actually attaching the label another process depends on.</p>
+
+      <p>For payout code, the safe shape is explicit: parse the application response, require its success field, and only then record payment. RustChain's current <code>scripts/bounty_payout.py</code> does this in its transfer helper: it rejects a response that is not a dictionary or whose <code>ok</code> value is false. The relevant public file is <a href="https://github.com/Scottcjn/rustchain-bounties/blob/main/scripts/bounty_payout.py">bounty_payout.py</a>.</p>
+
+      <p>That is an important design principle: <em>the state transition should depend on evidence of the effect, not merely evidence that an attempt was made.</em></p>
+
+      <h2>Pattern 2: converting unknown into empty</h2>
+
+      <p>A classic silent-success smell is a helper that catches any exception and returns an empty list, empty dictionary or default value. Sometimes that is harmless presentation logic. In a money decision it can be dangerous because “I could not query prior payouts” becomes indistinguishable from “there were no prior payouts.”</p>
+
+      <p>The current docstring gate contains an explicit fix for this class. Its weekly-earnings lookup uses a strict GitHub helper and raises when the query fails, so a lookup failure cannot be interpreted as zero earnings. The gate then holds the claim instead of approving it. See <a href="https://github.com/Scottcjn/rustchain-bounties/blob/main/scripts/docstring_gate.py">docstring_gate.py</a>.</p>
+
+      <p>That is what fail-closed means here: uncertainty does not create authorization.</p>
+
+      <h2>Pattern 3: state changes that are assumed rather than verified</h2>
+
+      <p>A pipeline often has multiple steps: verify work, add an eligibility label, discover the claim later, transfer funds, post confirmation, close the claim. If any step is used as an implicit signal for the next one, a silent failure can strand the workflow.</p>
+
+      <p>For example, if a gate posts “verified” but its label operation fails, the payout scanner may never discover the claim. That is why current RustChain code has moved some label operations to explicit REST calls and checks their process return code rather than assuming a CLI edit succeeded.</p>
+
+      <p>When reviewing this kind of system, I ask three questions for every external side effect:</p>
+
+      <ol>
+        <li>What exact evidence proves the action happened?</li>
+        <li>What happens if the dependency is unavailable or returns malformed data?</li>
+        <li>Can the workflow still return success after the desired state change did not occur?</li>
+      </ol>
+
+      <h2>A small scanner for triage</h2>
+
+      <p>I wrote a small Python AST scanner to speed up the first pass over the four payout-gate scripts named in the bounty. It finds <code>subprocess.run()</code> calls that do not set <code>check=True</code> and where the assigned process object's <code>returncode</code> is not inspected shortly afterwards.</p>
+
+      <p><a href="https://github.com/bodhibuurstede-sys/bodhi-site/blob/main/examples/rustchain-silent-success-scanner.py">Runnable scanner source</a></p>
+
+      <p>Run it from a local clone of the bounty repository:</p>
+
+      <pre><code>git clone https://github.com/Scottcjn/rustchain-bounties.git
+cd rustchain-bounties
+python /path/to/rustchain-silent-success-scanner.py</code></pre>
+
+      <p>The script intentionally calls its results <strong>candidates</strong>, not bugs. Static pattern matching cannot know whether ignoring a return code is safe. A subprocess may be best-effort logging, its output may be validated elsewhere, or the caller may intentionally continue after failure.</p>
+
+      <p>The scanner's value is therefore prioritization: it turns a large codebase into a smaller list of places where a human or agent should trace control flow carefully.</p>
+
+      <h2>How to turn a candidate into a real finding</h2>
+
+      <p>For the RustChain audit bounty, a useful report needs a concrete success-without-effect path. A good finding should identify the exact function and branch, the external failure condition, why the code still exits or reports success, and what intended effect is lost. If possible, reproduce it with a fake subprocess, mock API response or deterministic fixture.</p>
+
+      <p>For example, “this command does not use <code>check=True</code>” is not enough. A real finding would look more like: “when command X exits nonzero, helper Y returns an empty list; caller Z interprets that list as no payable claims and exits zero, so a failed GitHub query produces a green payout run that pays nobody.” That has an explicit cause, state transition and impact.</p>
+
+      <h2>The reusable rule</h2>
+
+      <p>The most useful rule I take from this codebase is simple: <strong>never collapse failure evidence into a legitimate zero value on an authorization or payout path.</strong> An empty result may be a valid business state. A failed lookup is not.</p>
+
+      <p>This applies far outside crypto: billing jobs, refund processors, CI deployment gates, database migrations, email delivery, account provisioning and any automation that has to prove a side effect occurred. A red failure is visible. Silent green failure is operational debt that compounds.</p>
+    </article>
+
+    <footer><p>© 2026 Bodhi</p></footer>
+  </main>
+</body>
+</html>
