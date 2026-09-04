@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Testing RustChain Proof-of-Antiquity Locally</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main>
+    <header>
+      <p><a href="index.html">← Back</a></p>
+      <h1>Testing RustChain Proof-of-Antiquity locally</h1>
+      <p>A small reproducible look at the public hardware-attestation validator.</p>
+      <div class="meta">4 September 2026 · Published by Bodhi Buurstede · AI-agent assistance disclosed</div>
+    </header>
+
+    <article>
+      <p>RustChain describes itself as a DePIN network built around Proof-of-Antiquity: instead of rewarding only raw modern compute, it tries to distinguish real physical hardware and assign higher reward multipliers to older classes of machines. The interesting part is not the marketing claim but the code path that turns hardware signals into a validation result.</p>
+
+      <p>The public RustChain repository contains <code>node/rip_proof_of_antiquity_hardware.py</code>, which currently combines four signal families: Shannon entropy from submitted bytes, CPU timing-profile matching, RAM-access characteristics, and the presence of a MAC signal. The validator then derives an antiquity tier and reward multiplier. The source is here: <a href="https://github.com/Scottcjn/Rustchain/blob/main/node/rip_proof_of_antiquity_hardware.py">RustChain hardware validator</a>.</p>
+
+      <h2>What the current validator actually does</h2>
+
+      <p>The CPU path expects at least ten timing samples. It compares their mean and sample variance with hard-coded profiles such as PowerPC G4, PowerPC G5, vintage x86, modern x86, vintage ARM and modern ARM. A timing sample set is accepted as a profile only when its variance falls inside that profile's permitted interval. Among eligible profiles, the closest mean wins.</p>
+
+      <p>The current tier mapping is straightforward. A PowerPC G4-like match becomes <strong>classic</strong>, a PowerPC G5 or vintage-x86 match becomes <strong>vintage</strong>, certain vintage ARM matches become <strong>heritage</strong>, and everything else remains <strong>modern</strong>. The corresponding multipliers in this module are currently 2.5×, 2.0×, 1.5× and 1.0× respectively.</p>
+
+      <p>RAM contributes differently. The code looks for three rough vintage indicators: sequential access above 200 ns, random access more than three times slower than sequential access, and a cache-hit rate below 0.7. Each indicator contributes one third of the RAM confidence score.</p>
+
+      <p>The overall entropy score is a weighted combination: 40% Shannon entropy, 30% CPU confidence, 20% RAM confidence and 10% for the presence of at least one MAC entry. The final proof currently needs an entropy score of at least 0.3. If CPU timing matched a known profile, its confidence also needs to be at least 0.4.</p>
+
+      <h2>A reproducible local experiment</h2>
+
+      <p>I made a tiny standalone demo that imports the real validator from a local RustChain checkout and feeds it two synthetic bundles. One is deliberately shaped around the current PowerPC G4 timing profile; the other around modern x86. It never sends an attestation or contacts a network, so it is safe to use as a local code-reading exercise.</p>
+
+      <p><a href="https://github.com/bodhibuurstede-sys/bodhi-site/blob/main/examples/rustchain-hardware-proof-demo.py">Runnable demo source</a></p>
+
+      <p>Clone RustChain, save or download the demo, then run it from the repository root:</p>
+
+      <pre><code>git clone https://github.com/Scottcjn/Rustchain.git
+cd Rustchain
+python /path/to/rustchain-hardware-proof-demo.py</code></pre>
+
+      <p>The classic-like payload uses ten samples centered exactly on 8,500 microseconds with a sample variance of about 311, which lies inside the current G4 profile's allowed 200–800 range. Its RAM values also trigger all three vintage indicators. The modern payload is centered on 500 microseconds with a variance around 19, inside the modern-x86 profile's 10–100 range, while its RAM values intentionally look modern.</p>
+
+      <p>The script asserts that the first payload is accepted as <code>classic</code> and that the second is accepted as <code>modern</code>. That makes the example useful as more than a pasted snippet: if the upstream validator changes enough to invalidate the assumptions, the assertions fail and the tutorial needs updating.</p>
+
+      <h2>What this does not prove</h2>
+
+      <p>This demo does <em>not</em> prove that synthetic signals can pass production attestation, nor that the full network relies only on this module. It tests one public validator in isolation. RustChain's wider documentation discusses additional anti-emulation and hardware-fingerprinting ideas, and production systems can layer checks around a helper module. The correct conclusion is therefore narrow: this is how one current public validation function behaves on deterministic input.</p>
+
+      <p>That distinction matters in any security-sensitive system. A local unit can be understood precisely without pretending that understanding one file equals understanding the entire trust model.</p>
+
+      <h2>Why this is a useful design to inspect</h2>
+
+      <p>Proof-of-Antiquity is an unusual engineering idea because it turns noisy physical measurements into an economic classification. That creates a difficult trade-off. Thresholds must be loose enough to accommodate real hardware variation, but tight enough that a fabricated or virtualized signal bundle cannot cheaply imitate an expensive class of machine.</p>
+
+      <p>The public code makes those assumptions visible. That is valuable even if you disagree with the choices: timing means, variance windows, entropy weights and acceptance thresholds can be tested instead of merely discussed. A good next step would be property-based testing across boundary values and recorded traces from many real machines, especially to quantify false positives and false negatives between neighboring profiles.</p>
+
+      <p>For anyone interested in DePIN, hardware attestation or agent identity, that is the most useful way to read RustChain: not as a token story, but as a set of falsifiable implementation choices.</p>
+    </article>
+
+    <footer><p>© 2026 Bodhi</p></footer>
+  </main>
+</body>
+</html>
