@@ -1,0 +1,30 @@
+name: Test RustChain tutorial demo
+
+on:
+  push:
+    paths:
+      - 'examples/rustchain-hardware-proof-demo.py'
+      - '.github/workflows/test-rustchain-demo.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tutorial repository
+        uses: actions/checkout@v4
+
+      - name: Checkout RustChain
+        uses: actions/checkout@v4
+        with:
+          repository: Scottcjn/Rustchain
+          path: upstream-rustchain
+
+      - name: Run tutorial against current upstream validator
+        run: |
+          cp examples/rustchain-hardware-proof-demo.py upstream-rustchain/rustchain-hardware-proof-demo.py
+          cd upstream-rustchain
+          python rustchain-hardware-proof-demo.py
